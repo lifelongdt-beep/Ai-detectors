@@ -54,6 +54,7 @@ export function analyze(texts, { seats = null } = {}) {
     }
     return { id: d.id, type: d.type, sightings: d.n, activity: d.secs.size / examSec, observers: d.observers.size,
       strongest: bins[0] ? { pos: bins[0].pos, observer: bins[0].observer, rssi: Math.round(bins[0].mean) } : null,
+      hint: d.type === 'WIFI' && d.secs.size / examSec > 0.45 ? '지속 고활동: 카메라 영상 전송 의심' : d.secs.size / examSec > 0.4 && d.type === 'BLE' ? '지속 고활동: 이어폰 음성 스트림 의심' : '',
       est, candidateSeats: nearest, positionsUsed: bins.length };
   }).sort((a, b) => b.activity - a.activity || b.sightings - a.sightings);
   return { devices, baselineSize: baseline.size, examRows: exam.length, examSec };
@@ -69,7 +70,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     console.log('※ 아래는 확인용 단서이며 부정행위의 증거가 아닙니다. 연결 중인 기기/셀룰러는 이 방식으로 볼 수 없습니다.\n');
     for (const d of res.devices.slice(0, 20)) {
       console.log(`${d.type} ${d.id}  활동 ${(d.activity * 100).toFixed(0)}%  관측 ${d.sightings}회  관측자 ${d.observers}명` +
-        `  최강 ${d.strongest ? `${d.strongest.pos}(${d.strongest.observer}) ${d.strongest.rssi}dBm` : '-'}  후보 좌석 ${d.candidateSeats ? d.candidateSeats.join(', ') : '위치 정보 부족'}`);
+        `${d.hint ? `  [${d.hint}]` : ''}  최강 ${d.strongest ? `${d.strongest.pos}(${d.strongest.observer}) ${d.strongest.rssi}dBm` : '-'}  후보 좌석 ${d.candidateSeats ? d.candidateSeats.join(', ') : '위치 정보 부족'}`);
     }
     if (!res.devices.length) console.log('기준선에 없던 새 기기가 없습니다.');
   }

@@ -73,7 +73,12 @@ function burstBehavior({ startAt, per, idleP, q, upP, resp, respP }, rng) {
 const streamBehavior = (startAt) => (t) => t < startAt ? { p: 0, phase: 'off' } : { p: 0.6 + 0.2 * Math.sin(t / 3), phase: 'stream' };
 const pulseBehavior = (startAt) => (t) => t < startAt ? { p: 0, phase: 'off' } : { p: (t - startAt) % 3 < 1 ? 0.5 : 0.02, phase: 'pulse' };
 
+const camStream = (startAt, p) => (t) => (t < startAt ? { p: 0, phase: 'off' } : { p, phase: 'stream' });
+
 const DEVICE = {
+  wifi_cam: (s) => ({ label: '무선 카메라(Wi-Fi 영상 전송)', band: 'WIFI', tx: 15, y: 0.9, cheat: true, act: camStream(s, 0.85) }),
+  fpv_cam: (s) => ({ label: '무선 영상 송신기(5.8GHz)', band: 'ISM', tx: 14, y: 0.9, cheat: true, act: camStream(s, 0.95) }),
+  sd_cam: (s) => ({ label: 'SD저장형 카메라(전파 없음)', band: 'WIFI', tx: -120, y: 0.9, cheat: true, silent: true, act: camStream(s, 0) }),
   phone_ai: (s, rng) => ({ label: '스마트폰 AI 질의', band: 'LTE', tx: 20, y: 0.7, cheat: true,
     act: burstBehavior({ startAt: s, per: [20, 50], idleP: 0.03, q: 1.5, upP: 0.9, resp: [4, 9], respP: 0.35 }, rng) }),
   earbud: (s) => ({ label: '무선 이어폰(음성 중계)', band: 'BLE', tx: 2, y: 1.15, cheat: true, act: streamBehavior(s) }),
@@ -93,6 +98,7 @@ export const SCENARIOS = {
   phone: { name: '스마트폰 AI 질의 1명', help: 'LTE로 AI에 문제를 물어보는 경우' },
   earbud: { name: '무선 이어폰 + 원격 도우미', help: 'BLE 음성 스트림 + 연결 폰' },
   wearable: { name: '스마트워치 + 스마트안경', help: '소형 웨어러블 기반 AI 활용' },
+  camera: { name: '초소형 카메라 (시험지 촬영·외부 전송)', help: 'Wi-Fi 영상, 무선 영상 송신기, 전파 없는 SD 저장형' },
   multi: { name: '복합 (인접 2명 + 오탐 포함)', help: '여러 유형이 동시에, 인접 좌석, 부주의 폰 포함' },
 };
 
@@ -118,6 +124,11 @@ function buildScenario(name, rng, seats) {
   if (name === 'phone') add('phone_ai', pickSeat(taken), start(), rng);
   if (name === 'earbud') { const s = pickSeat(taken); const t0 = start(); add('earbud', s, t0, rng); add('relay_phone', s, t0, rng); }
   if (name === 'wearable') { add('watch', pickSeat(taken), start(), rng); add('glasses', pickSeat(taken), start(), rng); }
+  if (name === 'camera') {
+    add('wifi_cam', pickSeat(taken), start(), rng);
+    add('fpv_cam', pickSeat(taken), start(), rng);
+    add('sd_cam', pickSeat(taken), start(), rng);
+  }
   if (name === 'multi') {
     const a = pickSeat(taken);
     add('phone_ai', a, start(), rng);
@@ -408,11 +419,12 @@ export class Simulation {
     tr.duty = duty;
     let s = 10 + duty * 70 + Math.min(tr.patternCount * 14, 42) + Math.min(tr.burstCount * 3, 9);
     if (tr.band === 'ISM') s += 20;
-    if (tr.band === 'BLE' && duty > 0.4) s += 15;
+    if ((tr.band === 'BLE' || tr.band === 'WIFI' || tr.band === 'ISM') && duty > 0.4) s += 15;
     tr.risk = Math.min(100, Math.round(s));
     // 유형 추정
     tr.tags = [];
     if (tr.band === 'BLE' && duty > 0.4) { tr.cls = '무선 이어폰·음성 중계 의심'; tr.tags.push('지속 스트림'); }
+    else if ((tr.band === 'WIFI' || tr.band === 'ISM') && duty > 0.45) { tr.cls = '카메라 의심 (지속 영상 스트림)'; tr.tags.push('지속 고활동'); }
     else if (tr.band === 'ISM') { tr.cls = '소출력 송신기 의심'; tr.tags.push('주기적 펄스'); }
     else if (tr.patternCount >= 1) { tr.cls = (tr.band === 'WIFI' ? '스마트안경' : tr.band === 'BLE' ? '웨어러블' : '스마트폰') + ' AI 질의 의심'; }
     else if (duty < 0.06) tr.cls = '저활동 장치(배경 통신 추정)';

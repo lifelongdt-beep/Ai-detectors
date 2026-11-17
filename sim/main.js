@@ -244,7 +244,7 @@ function drawPanel() {
   const missed = ui.truth.checked ? sim.missed() : [];
   $('blind').innerHTML = (blind.length ? `<b>⚠ 이 구성이 원리상 볼 수 없는 대역: ${blind.join(', ')}</b> — 해당 대역 기기는 탐지되지 않습니다.` : '이 구성은 모든 대역을 관측합니다.') +
     (ui.sensorMode.value !== 'fixed' ? '<br><b>⚠ 낙관적 가정:</b> 이 시뮬레이션은 폰이 블루투스/Wi-Fi 송신을 직접 수신한다고 가정합니다. 실제 일반 폰은 광고(비콘) 신호만 볼 수 있어 <b>이미 연결된 이어폰은 안 보일 수 있습니다</b> — 모의시험 실측이 필요합니다.' : '') +
-    (missed.length ? `<br><b>미탐지 부정행위 기기(정답 기준): ${missed.map((e) => e.label).join(', ')}</b>` : '');
+    (missed.length ? `<br><b>미탐지 부정행위 기기(정답 기준): ${missed.map((e) => e.label + (e.silent ? ' — 전파를 내지 않아 원리상 탐지 불가' : '')).join(', ')}</b>` : '');
   drawTimeline(tracks);
   drawHeat();
 }
