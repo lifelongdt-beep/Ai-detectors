@@ -131,17 +131,63 @@ function buildScenario(name, rng, seats) {
   return list;
 }
 
-// ---------- 위치 추정 ----------
-function buildGrid(sensors, seats) {
-  const { nx, nz, ys, step } = GRID, S = sensors.length, ny = ys.length;
-  const L = new Float32Array(nx * nz * ny * S);
-  for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
-    const c = (iy * nz + iz) * nx + ix, x = ix * step, y = ys[iy], z = iz * step;
-    for (let s = 0; s < S; s++) {
-      const d = Math.max(0.5, Math.hypot(x - sensors[s].x, y - sensors[s].y, z - sensors[s].z));
-      L[c * S + s] = 10 * N_EST * Math.log10(d);
+// ---------- 센서 구성 (고정 설치형 / 감독관 폰 / 혼합) ----------
+export const SENSOR_MODES = {
+  fixed: { name: '고정 센서 설치형', help: '전용 센서를 교실에 설치 (전 대역 탐지)' },
+  phones: { name: '감독관 폰 6대 (설치 없음)', help: '교실 3 + 복도 3, 블루투스/Wi-Fi만 탐지' },
+  hybrid: { name: '혼합 (고정 센서 + 감독관 폰)', help: '고정 센서의 사각지대를 폰이 보완' },
+};
+export const CORRIDOR_X = -1.3; // 복도(교실 왼쪽 벽 바깥)
+const WALL_LOSS = 9; // 실제 벽 감쇠(dB)
+const WALL_EST = 8; // 추정기가 아는 벽 감쇠(조금 틀리게 둠)
+const PHONE_BANDS = new Set(['BLE', 'WIFI']); // 일반 스마트폰이 앱으로 관측 가능한 대역
+const PHONE_FADING = 2.5, PHONE_STATIC = 3.5; // 손에 든 폰: 신체 가림으로 변동이 더 큼
+
+function makeRoute(points, speed, y, phase = 0) {
+  const pts = [...points, points[0]], seg = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); seg.push(d); total += d; }
+  return (t) => {
+    let u = (((t * speed + phase) % total) + total) % total;
+    for (let i = 0; i < seg.length; i++) {
+      if (u <= seg[i]) { const a = pts[i], b = pts[i + 1], f = seg[i] ? u / seg[i] : 0; return { x: a[0] + (b[0] - a[0]) * f, y, z: a[1] + (b[1] - a[1]) * f }; }
+      u -= seg[i];
+    }
+    return { x: pts[0][0], y, z: pts[0][1] };
+  };
+}
+
+function buildSensors(mode, fixedCount, patrol) {
+  const out = [];
+  if (mode !== 'phones') for (const s of sensorLayout(fixedCount)) out.push({ id: out.length + 1, kind: 'fixed', label: `S${out.length + 1}`, bands: null, hall: false, x: s.x, y: s.y, z: s.z });
+  if (mode !== 'fixed') {
+    const stations = [[6, 0.9], [1.0, 8.4], [11.0, 8.4]];
+    const routes = [[[3, 1.3], [3, 8.3], [5, 8.3], [5, 1.3]], [[7, 1.3], [7, 8.3], [9, 8.3], [9, 1.3]], [[1, 1.2], [1, 8.5], [11, 8.5], [11, 1.2]]];
+    const hallZ = [1.5, 4.5, 7.5], hallR = [[0.5, 3.2], [3.0, 6.0], [5.8, 8.6]];
+    for (let k = 0; k < 3; k++) {
+      const route = patrol.room ? makeRoute(routes[k], 0.6, 1.3, k * 9) : null;
+      const p0 = route ? route(0) : { x: stations[k][0], y: 1.3, z: stations[k][1] };
+      out.push({ id: out.length + 1, kind: 'phone', label: `교실${k + 1}`, bands: PHONE_BANDS, hall: false, route, x: p0.x, y: p0.y, z: p0.z, bx: p0.x, bz: p0.z });
+    }
+    for (let k = 0; k < 3; k++) {
+      const route = patrol.hall ? makeRoute([[CORRIDOR_X, hallR[k][0]], [CORRIDOR_X, hallR[k][1]]], 0.7, 1.3, k * 3) : null;
+      const p0 = route ? route(0) : { x: CORRIDOR_X, y: 1.3, z: hallZ[k] };
+      out.push({ id: out.length + 1, kind: 'phone', label: `복도${k + 1}`, bands: PHONE_BANDS, hall: true, route, x: p0.x, y: p0.y, z: p0.z, bx: p0.x, bz: p0.z });
     }
   }
+  return out;
+}
+
+function hashGauss(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const r = mulberry32(h >>> 0);
+  return gauss(r);
+}
+
+// ---------- 위치 추정 ----------
+function buildGrid(seats) {
+  const { nx, nz, step } = GRID;
   const seatOf = new Int16Array(nx * nz).fill(-1);
   const inZone = new Uint8Array(nx * nz);
   for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
@@ -151,23 +197,21 @@ function buildGrid(sensors, seats) {
     seatOf[iz * nx + ix] = best;
     if (x >= ZONE.x0 && x <= ZONE.x1 && z >= ZONE.z0 && z <= ZONE.z1) inZone[iz * nx + ix] = 1;
   }
-  return { L, seatOf, inZone, S };
+  return { seatOf, inZone };
 }
 
-function locate(g, seats, band, means) {
-  const { nx, nz, ys } = GRID, ny = ys.length, S = g.S, B = BANDS[band];
-  const det = [], und = [];
-  means.forEach((m, i) => (m == null ? und : det).push(i));
-  const cells = nx * nz * ny, costs = new Float32Array(cells);
+// dets: [{L, mean}] 들린 관측 묶음, unds: [{L}] 송신 중인데 안 들린 묶음
+function locate(g, seats, band, dets, unds) {
+  const { nx, nz, ys } = GRID, ny = ys.length, B = BANDS[band];
+  const cells = nx * nz * ny, costs = new Float32Array(cells), nd = dets.length;
   let minC = Infinity;
   for (let c = 0; c < cells; c++) {
-    const base = c * S;
     let sum = 0;
-    for (const i of det) sum += means[i] + g.L[base + i];
-    const Q = sum / det.length;
+    for (let k = 0; k < nd; k++) sum += dets[k].mean + dets[k].L[c];
+    const Q = sum / nd;
     let cost = 0;
-    for (const i of det) { const v = means[i] + g.L[base + i] - Q; cost += v * v; }
-    for (const i of und) { const ex = Q - g.L[base + i] - (B.sens + 3); if (ex > 0) cost += ex * ex; }
+    for (let k = 0; k < nd; k++) { const v = dets[k].mean + dets[k].L[c] - Q; cost += v * v; }
+    for (const u of unds) { const ex = Q - u.L[c] - (B.sens + 3); if (ex > 0) cost += ex * ex; }
     const tx = Q + B.ref; // 암시되는 송신전력: 비현실적이면 벌점
     if (tx > 27) cost += (tx - 27) ** 2;
     if (tx < -15) cost += (-15 - tx) ** 2;
@@ -191,20 +235,24 @@ function locate(g, seats, band, means) {
   for (let i = 0; i < xz.length; i++) xz[i] /= tot;
   const top = [...seatMass].map((m, i) => ({ idx: i, id: seats[i].id, p: m / tot })).sort((a, b) => b.p - a.p).slice(0, 3);
   return { x: ex, y: ey, z: ez, rH: Math.sqrt(varx + varz), rV: Math.sqrt(vary), seats: top,
-    zoneMass: zoneMass / tot, rms: Math.sqrt(minC / det.length), xz };
+    zoneMass: zoneMass / tot, rms: Math.sqrt(minC / nd), xz };
 }
 
 // ---------- 시뮬레이션 ----------
 export class Simulation {
-  constructor({ seed = 1, sensorCount = 8, calibrated = false, scenario = 'phone' } = {}) {
-    this.opts = { seed, sensorCount, calibrated, scenario };
+  constructor({ seed = 1, sensorCount = 8, calibrated = false, scenario = 'phone', sensorMode = 'fixed',
+    patrol = { room: true, hall: true }, posErr = 0.5, decorr = 0.7 } = {}) {
+    this.opts = { seed, sensorCount, calibrated, scenario, sensorMode, patrol, posErr, decorr };
     this.rng = mulberry32(seed);
     this.t = 0; this.tick = 0;
     this.seats = seatList();
-    this.sensors = sensorLayout(sensorCount);
-    this.grid = buildGrid(this.sensors, this.seats);
+    this.sensors = buildSensors(sensorMode, sensorCount, patrol);
+    this.minDetect = sensorMode === 'fixed' ? 2 : 1;
+    this.window = sensorMode === 'fixed' ? 20 : 40;
+    this.grid = buildGrid(this.seats);
+    this.lcache = new Map();
     this.emitters = buildScenario(scenario, this.rng, this.seats);
-    const sigma = calibrated ? 1.2 : 3.5; // 현장 사전측정(캘리브레이션)이 고정 음영 오차를 줄인다
+    const sigma = calibrated ? 1.2 : 3.5; // 현장 사전측정(캘리브레이션)은 고정 센서에만 적용
     for (const e of this.emitters) {
       e.nTrue = BANDS[e.band].n + (this.rng() - 0.5) * 0.6;
       e.off = this.sensors.map(() => gauss(this.rng) * sigma);
@@ -216,13 +264,56 @@ export class Simulation {
     this.heat = new Float32Array(GRID.nx * GRID.nz);
   }
 
+  // 이 센서 구성으로는 원리상 볼 수 없는 대역
+  get blindBands() {
+    const seen = new Set(Object.keys(BANDS));
+    for (const s of this.sensors) if (!s.bands) return [];
+    for (const b of PHONE_BANDS) seen.delete(b);
+    return [...seen];
+  }
+
+  moveSensors() {
+    for (const s of this.sensors) {
+      if (s.kind !== 'phone') continue;
+      if (s.route) { const p = s.route(this.t); s.x = p.x; s.y = p.y; s.z = p.z; }
+      // 폰이 스스로 믿는 위치 = 실제 위치 + 천천히 변하는 오차 (실내 위치 추정 한계)
+      s.ex = 0.995 * (s.ex || 0) + gauss(this.rng) * this.opts.posErr * 0.1;
+      s.ez = 0.995 * (s.ez || 0) + gauss(this.rng) * this.opts.posErr * 0.1;
+      s.bx = s.x + s.ex; s.bz = s.z + s.ez;
+    }
+  }
+
   observe(e) {
-    const B = BANDS[e.band];
-    return this.sensors.map((s, i) => {
+    const B = BANDS[e.band], arr = new Array(this.sensors.length).fill(null), obs = [];
+    let heard = 0;
+    this.sensors.forEach((s, i) => {
+      if (s.bands && !s.bands.has(e.band)) return; // 이 센서는 해당 대역을 볼 수 없음
       const d = Math.max(0.5, Math.hypot(e.pos.x - s.x, e.pos.y - s.y, e.pos.z - s.z));
-      const r = Math.round(e.tx - B.ref - 10 * e.nTrue * Math.log10(d) + e.off[i] + gauss(this.rng) * FAST_FADING);
-      return r >= B.sens ? r : null;
+      const fixed = s.kind === 'fixed';
+      const stat = fixed ? e.off[i] : hashGauss(`${this.opts.seed}|${e.id}|${s.id}|${Math.round(s.x / this.opts.decorr)},${Math.round(s.z / this.opts.decorr)}`) * PHONE_STATIC;
+      const r = Math.round(e.tx - B.ref - 10 * e.nTrue * Math.log10(d) - (s.hall ? WALL_LOSS : 0) + stat + gauss(this.rng) * (fixed ? FAST_FADING : PHONE_FADING));
+      const ok = r >= B.sens;
+      const o = fixed ? { key: `F${s.id}`, px: s.x, py: s.y, pz: s.z, wall: 0 }
+        : { px: Math.round(s.bx / 0.5) * 0.5, py: s.y, pz: Math.round(s.bz / 0.5) * 0.5, wall: s.hall ? WALL_EST : 0 };
+      if (!fixed) o.key = `P${s.id}:${o.px},${o.pz}`;
+      o.r = ok ? r : null;
+      obs.push(o);
+      if (ok) { arr[i] = r; heard++; }
     });
+    return { arr, obs, heard };
+  }
+
+  getL(o) {
+    let L = this.lcache.get(o.key);
+    if (L) return L;
+    const { nx, nz, ys, step } = GRID, ny = ys.length;
+    L = new Float32Array(nx * nz * ny);
+    for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
+      const d = Math.max(0.5, Math.hypot(ix * step - o.px, ys[iy] - o.py, iz * step - o.pz));
+      L[(iy * nz + iz) * nx + ix] = 10 * N_EST * Math.log10(d) + o.wall;
+    }
+    this.lcache.set(o.key, L);
+    return L;
   }
 
   advance(seconds) {
@@ -232,29 +323,30 @@ export class Simulation {
 
   step() {
     this.t += DT; this.tick++;
+    this.moveSensors();
     for (const e of this.emitters) {
       const { p, phase } = e.act(this.t);
       e.phase = phase;
       e.on = this.rng() < p;
       if (!e.on) continue;
-      const r = this.observe(e);
-      if (r.filter((x) => x != null).length < 2) continue; // 센서 2개 이상에서 들려야 '탐지'
-      this.ingest(e, r);
+      const o = this.observe(e);
+      if (o.heard < this.minDetect) continue; // 최소 센서 수 이상에서 들려야 '탐지'
+      this.ingest(e, o);
     }
     if (this.tick % 5 === 0) this.housekeeping();
   }
 
-  ingest(e, r) {
+  ingest(e, o) {
     let tr = this.tracks.get(e.id);
     if (!tr) {
       tr = { key: e.id, name: `T${this.tracks.size + 1}`, band: e.band, firstSeen: this.t, samples: [], onTimes: [],
         est: null, risk: 0, level: 0, patternCount: 0, burstCount: 0, openBursts: [], lastBurst: -99,
-        history: [], lastOnT: this.t, lastRssi: r, excluded: false, tags: [], cls: '미분류 송신원', cell: 0 };
+        history: [], lastOnT: this.t, lastRssi: o.arr, excluded: false, tags: [], cls: '미분류 송신원', cell: 0 };
       this.tracks.set(e.id, tr);
     }
-    tr.samples.push({ t: this.t, r });
+    tr.samples.push({ t: this.t, obs: o.obs });
     tr.onTimes.push(this.t);
-    tr.lastOnT = this.t; tr.lastRssi = r;
+    tr.lastOnT = this.t; tr.lastRssi = o.arr;
     this.events.push({ type: 'tx', key: e.id, band: e.band, t: this.t });
   }
 
@@ -264,7 +356,7 @@ export class Simulation {
     const t = this.t;
     for (let i = 0; i < this.heat.length; i++) this.heat[i] *= 0.995;
     for (const tr of this.tracks.values()) {
-      while (tr.samples.length && tr.samples[0].t < t - 20) tr.samples.shift();
+      while (tr.samples.length && tr.samples[0].t < t - this.window) tr.samples.shift();
       while (tr.onTimes.length && tr.onTimes[0] < t - 60) tr.onTimes.shift();
       tr.history.push(this.countOn(tr, t - 1, t + 0.01) / 5);
       if (tr.history.length > 180) tr.history.shift();
@@ -289,13 +381,21 @@ export class Simulation {
   }
 
   estimate(tr) {
-    const S = this.sensors.length;
-    const sums = new Array(S).fill(0), cnt = new Array(S).fill(0);
-    for (const s of tr.samples) s.r.forEach((v, i) => { if (v != null) { sums[i] += v; cnt[i]++; } });
-    const n = tr.samples.length;
-    const means = sums.map((s, i) => (cnt[i] >= 2 && cnt[i] >= 0.3 * n ? s / cnt[i] : null));
-    if (means.filter((m) => m != null).length < 3) { tr.est = null; return; }
-    const e = locate(this.grid, this.seats, tr.band, means);
+    const agg = new Map();
+    for (const s of tr.samples) for (const o of s.obs) {
+      let a = agg.get(o.key);
+      if (!a) { a = { o, sum: 0, cnt: 0, tot: 0 }; agg.set(o.key, a); }
+      a.tot++;
+      if (o.r != null) { a.sum += o.r; a.cnt++; }
+    }
+    const need = this.opts.sensorMode === 'phones' ? 1 : 2;
+    const dets = [], unds = [];
+    for (const a of agg.values()) {
+      if (a.cnt >= need && a.cnt >= 0.3 * a.tot) dets.push({ L: this.getL(a.o), mean: a.sum / a.cnt });
+      else if (a.tot >= 2 && a.cnt === 0) unds.push({ L: this.getL(a.o) });
+    }
+    if (dets.length < 3) { tr.est = null; return; }
+    const e = locate(this.grid, this.seats, tr.band, dets, unds);
     tr.est = e;
     tr.excluded = e.zoneMass > 0.8;
     if (!tr.excluded) for (let i = 0; i < this.heat.length; i++) this.heat[i] += e.xz[i] * 0.15;
@@ -337,5 +437,10 @@ export class Simulation {
     const err3 = Math.hypot(tr.est.x - e.pos.x, tr.est.y - e.pos.y, tr.est.z - e.pos.z);
     const top = tr.est.seats.map((s) => s.idx);
     return { emitter: e, errH, err3, top1: e.seat ? top[0] === e.seat.idx : null, top3: e.seat ? top.includes(e.seat.idx) : null };
+  }
+
+  // 정답 기준: 이미 송신을 시작했는데 아직 탐지 못 한 부정행위 기기 (검증용)
+  missed() {
+    return this.emitters.filter((e) => e.cheat && this.t > e.startAt + 60 && !this.tracks.has(e.id));
   }
 }

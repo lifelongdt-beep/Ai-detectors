@@ -45,7 +45,7 @@
   <div id="hud"><h1>AI 부정행위 전파 탐지 시뮬레이터</h1><div>수능 시험장 · 교육부 제안용 프로토타입 1단계 (가상 데이터)</div></div>
   <div id="clock">00:00</div>
   <div id="legend">
-    <i style="background:#22d3ee"></i>센서
+    <i style="background:#22d3ee"></i>고정 센서<i style="background:#ffe066;border-radius:2px"></i>감독관 폰
     <i style="background:#4aa3ff"></i>블루투스
     <i style="background:#7bdc7b"></i>Wi-Fi
     <i style="background:#ff8a3d"></i>셀룰러
@@ -56,8 +56,16 @@
 <div id="panel">
   <h2>시나리오</h2>
   <div class="row"><select id="scenario"></select></div>
-  <div class="row"><label>센서 수 <b id="sensorN">8</b></label><input id="sensors" type="range" min="4" max="12" value="8">
+  <h2>센서 구성</h2>
+  <div class="row"><select id="sensorMode"></select></div>
+  <div class="row"><label>고정 센서 수 <b id="sensorN">8</b></label><input id="sensors" type="range" min="4" max="12" value="8">
     <label><input id="calib" type="checkbox"> 현장 캘리브레이션</label></div>
+  <div class="row" id="phoneOpts">
+    <label><input id="patrolRoom" type="checkbox" checked> 교실 감독관 순찰</label>
+    <label><input id="patrolHall" type="checkbox" checked> 복도 감독관 순찰</label>
+    <label>폰 위치 오차 ±<b id="posErrN">0.5</b>m</label><input id="posErr" type="range" min="0" max="2" step="0.1" value="0.5">
+  </div>
+  <div id="blind" class="note"></div>
   <div class="row">
     <button id="play">일시정지</button>
     <select id="speed" style="flex:0 0 80px"><option value="1">1배속</option><option value="4" selected>4배속</option><option value="10">10배속</option><option value="20">20배속</option></select>

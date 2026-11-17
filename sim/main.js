@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { Simulation, ROOM, GRID, ZONE, BANDS, SCENARIOS, SEAT_COLS } from './engine.js';
+import { Simulation, ROOM, GRID, ZONE, BANDS, SCENARIOS, SENSOR_MODES, CORRIDOR_X } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#ff6b6b', '#4aa3ff', '#ffd166', '#7bdc7b', '#d36bff', '#4de1d2', '#ff9ecb', '#c0c0c0'];
@@ -9,10 +9,11 @@ const LEVEL_COLOR = ['#8e9bbd', '#4fd18b', '#ffc04d', '#ff5d5d'];
 
 // ---------- 상태 ----------
 let sim, playing = true, seed = 1, lastFrame = performance.now(), lastPanel = 0;
-const ui = { scenario: $('scenario'), sensors: $('sensors'), calib: $('calib'), speed: $('speed'),
+const ui = { sensorMode: $('sensorMode'), patrolRoom: $('patrolRoom'), patrolHall: $('patrolHall'), posErr: $('posErr'), scenario: $('scenario'), sensors: $('sensors'), calib: $('calib'), speed: $('speed'),
   truth: $('truth'), heat: $('heat'), links: $('links') };
 for (const [k, v] of Object.entries(SCENARIOS)) ui.scenario.add(new Option(v.name, k));
 ui.scenario.value = 'multi';
+for (const [k, v] of Object.entries(SENSOR_MODES)) ui.sensorMode.add(new Option(v.name, k));
 
 // ---------- Three.js 기본 ----------
 const view = $('view');
@@ -22,9 +23,9 @@ view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b1020);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-camera.position.set(6, 12.5, 15.5);
+camera.position.set(5.2, 12.5, 15.8);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(6, 0.8, 4.4);
+controls.target.set(5.2, 0.8, 4.4);
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.update();
 scene.add(new THREE.AmbientLight(0xffffff, 0.9));
@@ -47,6 +48,12 @@ const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry
   new THREE.LineBasicMaterial({ color: 0x3b4b7d }));
 box.position.set(ROOM.w / 2, ROOM.h / 2, ROOM.d / 2);
 scene.add(box);
+const corridor = new THREE.Mesh(new THREE.PlaneGeometry(2.6, ROOM.d).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x141a30, roughness: 1 }));
+corridor.position.set(-1.3, 0, ROOM.d / 2); scene.add(corridor);
+const corridorBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(2.6, ROOM.h, ROOM.d)), new THREE.LineBasicMaterial({ color: 0x2a365e }));
+corridorBox.position.set(-1.3, ROOM.h / 2, ROOM.d / 2); scene.add(corridorBox);
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.d, ROOM.h).rotateY(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5b78d6, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+wall.position.set(0, ROOM.h / 2, ROOM.d / 2); scene.add(wall);
 const board = new THREE.Mesh(new THREE.BoxGeometry(4, 1.1, 0.05), new THREE.MeshStandardMaterial({ color: 0x1f5d46 }));
 board.position.set(6, 1.6, 0.03);
 scene.add(board);
@@ -71,6 +78,7 @@ function makeLabel(text, color = '#ffffff', scale = 1) {
   return spr;
 }
 const zoneLabel = makeLabel('감독관석(제외)', '#4fd18b', 0.8); zoneLabel.position.set(6, 0.5, 0.7); scene.add(zoneLabel);
+const corrLabel = makeLabel('복도', '#8e9bbd', 0.8); corrLabel.position.set(-1.3, 0.3, 4.5); scene.add(corrLabel);
 const frontLabel = makeLabel('앞(칠판)', '#9fb4ff', 0.8); frontLabel.position.set(6, 2.6, 0.2); scene.add(frontLabel);
 
 // 열지도 텍스처
@@ -94,11 +102,11 @@ function drawHeat() {
 
 // ---------- 동적 오브젝트 ----------
 let dyn = new THREE.Group(); scene.add(dyn);
-let trackViz = new Map(), truthViz = [], ripples = [], seatMeshes = [];
+let trackViz = new Map(), truthViz = [], ripples = [], seatMeshes = [], sensorViz = [];
 
 function buildWorld() {
   scene.remove(dyn); dyn = new THREE.Group(); scene.add(dyn);
-  trackViz = new Map(); ripples = []; truthViz = []; seatMeshes = [];
+  trackViz = new Map(); ripples = []; truthViz = []; seatMeshes = []; sensorViz = [];
   const deskMat = new THREE.MeshStandardMaterial({ color: 0x2b3a66 });
   for (const s of sim.seats) {
     const desk = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.5), deskMat);
@@ -110,10 +118,14 @@ function buildWorld() {
     seatMeshes.push([body, head]);
   }
   const sMat = new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x0a6d7d });
+  const pMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0x7a6410 });
   for (const s of sim.sensors) {
-    const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.14), sMat);
-    m.position.set(s.x, s.y, s.z); dyn.add(m);
-    const l = makeLabel(`S${s.id}`, '#22d3ee', 0.45); l.position.set(s.x, s.y + 0.3, s.z); dyn.add(l);
+    const phone = s.kind === 'phone';
+    const m = new THREE.Mesh(phone ? new THREE.BoxGeometry(0.16, 0.3, 0.04) : new THREE.OctahedronGeometry(0.14), phone ? pMat : sMat);
+    dyn.add(m);
+    const l = makeLabel(s.label, phone ? '#ffe066' : '#22d3ee', 0.45); dyn.add(l);
+    sensorViz.push({ s, m, l });
+    if (phone) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.3, 10), new THREE.MeshStandardMaterial({ color: 0xb59a2e, transparent: true, opacity: 0.55 })); dyn.add(p); sensorViz[sensorViz.length - 1].body = p; }
   }
   for (const e of sim.emitters) {
     const g = new THREE.Group();
@@ -156,7 +168,14 @@ function spawnRipple(pos, color) {
 }
 
 // ---------- 갱신 ----------
+function syncSensors() {
+  for (const v of sensorViz) {
+    v.m.position.set(v.s.x, v.s.y, v.s.z); v.l.position.set(v.s.x, v.s.y + 0.45, v.s.z);
+    if (v.body) v.body.position.set(v.s.x, 0.65, v.s.z);
+  }
+}
 function syncScene(now) {
+  syncSensors();
   const lastRipple = syncScene.lr || (syncScene.lr = new Map());
   for (const ev of sim.events.splice(0)) {
     const tr = sim.tracks.get(ev.key), v = trackViz.get(ev.key);
@@ -221,6 +240,11 @@ function drawPanel() {
     }).join('') + '</table>' : '<div class="empty">아직 탐지된 송신원이 없습니다.</div>';
   $('alerts').innerHTML = sim.alerts.length ? sim.alerts.slice(0, 40).map((a) =>
     `<div><span class="lv${a.level}">[${fmt(a.t)}] ${a.name} ${a.label}</span> — ${a.text}</div>`).join('') : '<div class="empty">경보 없음</div>';
+  const blind = sim.blindBands.map((b) => BANDS[b].name);
+  const missed = ui.truth.checked ? sim.missed() : [];
+  $('blind').innerHTML = (blind.length ? `<b>⚠ 이 구성이 원리상 볼 수 없는 대역: ${blind.join(', ')}</b> — 해당 대역 기기는 탐지되지 않습니다.` : '이 구성은 모든 대역을 관측합니다.') +
+    (ui.sensorMode.value !== 'fixed' ? '<br><b>⚠ 낙관적 가정:</b> 이 시뮬레이션은 폰이 블루투스/Wi-Fi 송신을 직접 수신한다고 가정합니다. 실제 일반 폰은 광고(비콘) 신호만 볼 수 있어 <b>이미 연결된 이어폰은 안 보일 수 있습니다</b> — 모의시험 실측이 필요합니다.' : '') +
+    (missed.length ? `<br><b>미탐지 부정행위 기기(정답 기준): ${missed.map((e) => e.label).join(', ')}</b>` : '');
   drawTimeline(tracks);
   drawHeat();
 }
@@ -247,11 +271,16 @@ function frame(now) {
 }
 
 function start() {
-  sim = new Simulation({ seed, sensorCount: Number(ui.sensors.value), calibrated: ui.calib.checked, scenario: ui.scenario.value });
+  sim = new Simulation({ seed, sensorCount: Number(ui.sensors.value), calibrated: ui.calib.checked, scenario: ui.scenario.value,
+    sensorMode: ui.sensorMode.value, patrol: { room: ui.patrolRoom.checked, hall: ui.patrolHall.checked }, posErr: Number(ui.posErr.value) });
+  const mode = ui.sensorMode.value;
+  ui.sensors.disabled = mode === 'phones'; ui.calib.disabled = mode === 'phones';
+  $('phoneOpts').style.display = mode === 'fixed' ? 'none' : 'flex';
+  $('posErrN').textContent = ui.posErr.value;
   $('sensorN').textContent = ui.sensors.value;
   buildWorld(); drawPanel();
 }
-ui.scenario.onchange = ui.sensors.oninput = ui.calib.onchange = start;
+ui.scenario.onchange = ui.sensors.oninput = ui.calib.onchange = ui.sensorMode.onchange = ui.patrolRoom.onchange = ui.patrolHall.onchange = ui.posErr.oninput = start;
 $('reset').onclick = start;
 $('reseed').onclick = () => { seed++; start(); };
 $('play').onclick = () => { playing = !playing; $('play').textContent = playing ? '일시정지' : '재생'; };

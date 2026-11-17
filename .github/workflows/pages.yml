@@ -1,0 +1,31 @@
+# 시뮬레이터(sim/)를 GitHub Pages로 배포: 링크 하나로 전국 어디서나 브라우저로 열람
+# 사전 설정(1회): 저장소 Settings > Pages > Build and deployment > Source = "GitHub Actions"
+name: Deploy simulator to Pages
+on:
+  push:
+    branches: [main]
+    paths: ['sim/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check engine
+        run: node sim/test.mjs --quick
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: sim
+      - id: deployment
+        uses: actions/deploy-pages@v4
