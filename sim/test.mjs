@@ -10,8 +10,8 @@ const CONFIGS = [
   ['고정 4개', { sensorMode: 'fixed', sensorCount: 4 }],
   ['고정 8개', { sensorMode: 'fixed', sensorCount: 8 }],
   ['고정 8개+캘리브레이션', { sensorMode: 'fixed', sensorCount: 8, calibrated: true }],
-  ['감독관 폰 6대 (순찰)', { sensorMode: 'phones' }],
-  ['감독관 폰 6대 (제자리)', { sensorMode: 'phones', patrol: { room: false, hall: false } }],
+  ['감독관 전용 단말 6대 (순찰)', { sensorMode: 'phones' }],
+  ['감독관 전용 단말 6대 (제자리)', { sensorMode: 'phones', patrol: { room: false, hall: false } }],
   ['혼합 (고정4 + 폰6)', { sensorMode: 'hybrid', sensorCount: 4 }],
 ];
 // 기기 유형별로 따로 평가 (phone=LTE, earbud=BLE+LTE, wearable=BLE+WIFI)

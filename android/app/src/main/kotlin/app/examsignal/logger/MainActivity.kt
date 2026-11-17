@@ -98,7 +98,7 @@ class MainActivity : Activity() {
         root.addView(text("관측자 이름 (예: 교실1, 복도2)", 12f, Color.DKGRAY))
         observerEdit = EditText(this).apply { setText("교실1"); setSingleLine() }
         root.addView(observerEdit)
-        root.addView(text("시험 세션 키 (모든 폰에 같은 값 입력, 기기 식별자 해시용)", 12f, Color.DKGRAY))
+        root.addView(text("시험 세션 키 (모든 단말에 같은 값 입력, 기기 식별자 해시용)", 12f, Color.DKGRAY))
         keyEdit = EditText(this).apply { setText("mock-" + SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())); setSingleLine() }
         root.addView(keyEdit)
 
@@ -256,7 +256,7 @@ class MainActivity : Activity() {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
         val online = caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         return when {
-            online -> "⚠ 네트워크에 연결된 상태입니다. 감독관 폰은 외부 통신 금지 → 비행기 모드를 켜고 Wi-Fi/블루투스만 수신용으로 켜세요."
+            online -> "⚠ 네트워크에 연결된 상태입니다. 감독관 전용 단말은 외부 통신 금지 → 비행기 모드를 켜고 Wi-Fi/블루투스만 수신용으로 켜세요."
             !airplane -> "⚠ 비행기 모드가 꺼져 있습니다. 시험 중에는 켜 두세요 (Wi-Fi/블루투스는 따로 켤 수 있음)."
             else -> null
         }

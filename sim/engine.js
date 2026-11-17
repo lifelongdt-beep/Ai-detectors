@@ -142,16 +142,16 @@ function buildScenario(name, rng, seats) {
   return list;
 }
 
-// ---------- 센서 구성 (고정 설치형 / 감독관 폰 / 혼합) ----------
+// ---------- 센서 구성 (고정 설치형 / 감독관 전용 단말 / 혼합) ----------
 export const SENSOR_MODES = {
   fixed: { name: '고정 센서 설치형', help: '전용 센서를 교실에 설치 (전 대역 탐지)' },
-  phones: { name: '감독관 폰 6대 (설치 없음)', help: '교실 3 + 복도 3, 블루투스/Wi-Fi만 탐지' },
-  hybrid: { name: '혼합 (고정 센서 + 감독관 폰)', help: '고정 센서의 사각지대를 폰이 보완' },
+  phones: { name: '감독관 전용 단말 6대 (설치 없음)', help: '교실 3 + 복도 3, 블루투스/Wi-Fi만 탐지' },
+  hybrid: { name: '혼합 (고정 센서 + 감독관 전용 단말)', help: '고정 센서의 사각지대를 전용 단말이 보완' },
 };
 export const CORRIDOR_X = -1.3; // 복도(교실 왼쪽 벽 바깥)
 const WALL_LOSS = 9; // 실제 벽 감쇠(dB)
 const WALL_EST = 8; // 추정기가 아는 벽 감쇠(조금 틀리게 둠)
-const PHONE_BANDS = new Set(['BLE', 'WIFI']); // 일반 스마트폰이 앱으로 관측 가능한 대역
+const PHONE_BANDS = new Set(['BLE', 'WIFI']); // 일반 안드로이드 단말이 앱으로 관측 가능한 대역
 const PHONE_FADING = 2.5, PHONE_STATIC = 3.5; // 손에 든 폰: 신체 가림으로 변동이 더 큼
 
 function makeRoute(points, speed, y, phase = 0) {
