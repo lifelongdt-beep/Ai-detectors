@@ -55,7 +55,7 @@ Three.js는 `sim/vendor`에 포함되어 있어 인터넷 없이 동작한다.
 ## 안드로이드 신호 로거 (2단계 프로토타입)
 
 `android/`: 감독관 전용 단말용 네이티브 앱. 블루투스/Wi-Fi 신호 세기를 단말에 기록하고(인터넷 권한 없음), 기준선에 없던 새 신호를 알린다.
-`tools/analyze_logs.mjs`: 여러 폰의 로그를 합쳐 새 기기와 후보 좌석을 추정. 자세한 사용법과 한계는 [`docs/안드로이드_앱.md`](docs/안드로이드_앱.md).
+`tools/analyze_logs.mjs`: 여러 단말의 로그를 합쳐 새 기기와 후보 좌석을 추정. 자세한 사용법과 한계는 [`docs/안드로이드_앱.md`](docs/안드로이드_앱.md).
 `.github/workflows/android.yml`이 빌드·단위 테스트·"INTERNET 권한 없음" 검사 후 APK를 아티팩트로 올린다.
 
 ## 다음 단계
