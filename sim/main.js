@@ -33,11 +33,19 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(5, 12, 4);
 scene.add(sun);
 
+const BASE_DIST = camera.position.distanceTo(controls.target);
 function resize() {
-  const w = view.clientWidth, h = view.clientHeight;
+  const w = view.clientWidth, h = Math.max(1, view.clientHeight);
+  if (w < 2) return;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  // 세로로 긴 화면(휴대폰)에서는 교실 전체가 보이도록 카메라를 뒤로 뺀다
+  const d = BASE_DIST * Math.max(1, 1.6 / camera.aspect);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  camera.position.copy(controls.target).addScaledVector(dir, d);
+  controls.update();
 }
 addEventListener('resize', resize);
+new ResizeObserver(resize).observe(view);
 
 // 교실 골격
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d).rotateX(-Math.PI / 2),
